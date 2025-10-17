@@ -5,15 +5,19 @@ from pathlib import Path
 from datetime import datetime
 import pandas as pd
 import os
+import io
+import zipfile
 
 # ===========================
 # 🔐 CONFIGURACIÓN
 # ===========================
 st.set_page_config(page_title="Panel de Procesos", page_icon="⚙️", layout="centered")
-PASSWORD = os.getenv("APP_PASS", "1234segura")
+
+PASSWORD = os.getenv("APP_PASS", "1234segura")  # Clave general configurable
 LOG_PATH = Path("logs/registros.csv")
-LOG_PATH.parent.mkdir(exist_ok=True, parents=True)
 OUTPUT_PATH = Path("outputs")
+
+LOG_PATH.parent.mkdir(exist_ok=True, parents=True)
 OUTPUT_PATH.mkdir(exist_ok=True, parents=True)
 
 # ===========================
@@ -30,7 +34,7 @@ def cargar_procesos():
 PROCESOS = cargar_procesos()
 
 # ===========================
-# 🔒 LOGIN
+# 🔒 LOGIN SIMPLE
 # ===========================
 if "auth" not in st.session_state:
     st.session_state.auth = False
@@ -41,13 +45,14 @@ if not st.session_state.auth:
     if st.button("Entrar"):
         if clave == PASSWORD:
             st.session_state.auth = True
+            st.success("✅ Acceso concedido")
             st.rerun()
         else:
             st.error("❌ Clave incorrecta")
     st.stop()
 
 # ===========================
-# 🧭 INTERFAZ
+# 🧭 INTERFAZ PRINCIPAL
 # ===========================
 st.sidebar.title("⚙️ Panel de Procesos")
 menu = ["📊 Ver registros"] + [f"🚀 {k}" for k in PROCESOS.keys()]
@@ -82,7 +87,7 @@ if opcion == "📊 Ver registros":
     st.stop()
 
 # ===========================
-# ⚙️ PROCESOS DINÁMICOS
+# ⚙️ EJECUTAR PROCESO SELECCIONADO
 # ===========================
 proceso_key = opcion.replace("🚀 ", "")
 mod = PROCESOS.get(proceso_key)
@@ -108,15 +113,41 @@ if archivo and usuario:
             result = mod.run(pdf_path, out_folder)
             st.success("✅ Proceso completado correctamente.")
 
-            # Mostrar resultados si los hay
+            # Mostrar resultados resumidos
             for k, v in result.items():
-                st.write(f"**{k.capitalize()}:** {v}")
+                st.write(f"**{k}:** {v}")
 
-            # Registrar uso
+            # ==============================
+            # 📦 CREAR ARCHIVO ZIP DE RESULTADOS
+            # ==============================
+            zip_buffer = io.BytesIO()
+            with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
+                # CSV
+                csv_path = out_folder / "comprobantes_refinado" / "operaciones.csv"
+                if csv_path.exists():
+                    zipf.write(csv_path, arcname=csv_path.name)
+                # PDFs
+                pdfs_folder = out_folder / "comprobantes_refinado" / "pdfs"
+                if pdfs_folder.exists():
+                    for pdf in pdfs_folder.glob("*.pdf"):
+                        zipf.write(pdf, arcname=f"pdfs/{pdf.name}")
+
+            zip_buffer.seek(0)
+            nombre_zip = f"resultados_{proceso_key}.zip"
+
+            st.download_button(
+                label="📦 Descargar resultados (.zip)",
+                data=zip_buffer,
+                file_name=nombre_zip,
+                mime="application/zip",
+            )
+
+            # Registrar ejecución
             registrar_uso(usuario, proceso_key, archivo.name, "Éxito")
 
         except Exception as e:
-            st.error(f"⚠ Error: {e}")
+            st.error(f"⚠️ Error: {e}")
             registrar_uso(usuario, proceso_key, archivo.name, f"Error: {e}")
+
 else:
     st.info("🔸 Introduce tu nombre y selecciona un archivo PDF para comenzar.")
